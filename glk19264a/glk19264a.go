@@ -20,6 +20,7 @@ type Display interface {
 	Open()			bool
 	Close()			bool
 	ClrScreen()		int
+	ClrWindow(int)		int
 	Text(string)		int
 	Send([]byte)		int
 	SendRecv([]byte, bool)	(int, []byte)
@@ -36,6 +37,13 @@ type Display interface {
 	KeyPadOff()	int
 	KeyPadON(int)	int
 	Font(int)	int
+	InitTextWindow(int, int, int, int, int, int, int, int, int) int
+	SetTextWindow(int) int
+	Rectangle(int, int, int, int, int) int
+	WriteScratch(int, []byte) int
+	ReadScratch(int, int) (int, []byte)
+	AutoTransmKey(bool) int
+
 }
 
 type display struct {
@@ -48,6 +56,13 @@ type display struct {
 const (
         OPENED uint32 = iota
         CLOSED
+)
+
+const (
+	OFF int = iota
+	GREEN
+	RED
+	YELLOW
 )
 
 func NewDisplay(opt *PortOptions) Display {
@@ -112,7 +127,7 @@ func (m *display) SendRecv(data []byte, recv bool) (int, []byte) {
 		return n, nil
 	}
 
-	buf := make([]byte,64)
+	buf := make([]byte,128)
 	n, _ = m.port.Read(buf)
 
 	res = append(res,buf[:n]...)
@@ -288,6 +303,76 @@ func (m *display) Font(id int) (int) {
 	data = append(data, idb...)
 	n3 := m.Send(data)
 	return n3
+}
+
+func (m *display) InitTextWindow(id, x1, y1, x2, y2, font, charSpace, lineSpace, scroll int) int {
+	data := []byte{0xFE, 0x2B, byte(id), byte(x1), byte(y1), byte(x2), byte(y2)}
+	fontb := make([]byte,2)
+	binary.LittleEndian.PutUint16(fontb, uint16(font))
+	data = append(data, fontb...)
+	data = append(data, byte(charSpace))
+	data = append(data, byte(lineSpace))
+	data = append(data, byte(scroll))
+
+	n1 := m.Send(data)
+	return n1
+}
+
+func (m *display) SetTextWindow(id int) (int) {
+	data := []byte{0xFE, 0x2A, byte(id)}
+	n1 := m.Send(data)
+        return n1
+}
+
+func (m *display) ClrWindow(id int) (int) {
+	n := m.Send([]byte{0xFE, 0x2C, byte(id)})
+	return n
+}
+
+func (m *display) Rectangle(colour, x1, y1, x2, y2 int) int {
+	data := []byte{0xFE, 0x72, byte(colour), byte(x1), byte(y1), byte(x2), byte(y2)}
+
+	n1 := m.Send(data)
+	return n1
+}
+
+func (m *display) WriteScratch(addr int, data []byte) (int) {
+	dat1 := []byte{0xFE, 0xCC}
+	addrb := make([]byte,2)
+	sizeb := make([]byte,2)
+	binary.LittleEndian.PutUint16(addrb, uint16(addr))
+	binary.LittleEndian.PutUint16(sizeb, uint16(len(data)))
+	dat1 = append(dat1, addrb...)
+	dat1 = append(dat1, sizeb...)
+	dat1 = append(dat1, data...)
+	n := m.Send(dat1)
+
+	return n
+}
+
+func (m *display) ReadScratch(addr, size int) (int, []byte) {
+	dat1 := []byte{0xFE, 0xCD}
+	addrb := make([]byte,2)
+	sizeb := make([]byte,2)
+	binary.LittleEndian.PutUint16(addrb, uint16(addr))
+	binary.LittleEndian.PutUint16(sizeb, uint16(size))
+	dat1 = append(dat1, addrb...)
+	dat1 = append(dat1, sizeb...)
+	n, datOut := m.SendRecv(dat1, true)
+
+	return n, datOut
+}
+
+func (m *display) AutoTransmKey(on bool) (int) {
+	var dat1 []byte
+	if on {
+		dat1 = []byte{0xFE, 0x41}
+	} else {
+		dat1 = []byte{0xFE, 0x4F}
+	}
+	n := m.Send(dat1)
+
+	return n
 }
 
 

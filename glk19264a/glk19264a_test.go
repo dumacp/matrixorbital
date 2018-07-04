@@ -2,14 +2,16 @@ package glk19264a
 
 
 import (
+	"fmt"
 	"testing"
-	"time"
+	"strings"
+	_ "time"
 )
 
-/**/
+/**
 func TestTextRow(t *testing.T) {
 	t.Log("Start Logs")
-	config := &PortOptions{Port: "/dev/ttyUSB0", Baud: 19200}
+	config := &PortOptions{Port: "/dev/ttyUSB2", Baud: 19200}
         m := NewDisplay(config)
 
 	if ok := m.Open(); !ok {
@@ -19,15 +21,19 @@ func TestTextRow(t *testing.T) {
 
 	m.ClrScreen()
 	m.Font(2)
+	m.SetTextWindow(0)
+
 	row0 := m.TextColRow(0,0)
 
-	if n := row0("PRUEBA DESDE GO Row 1!!!"); n <=0 {
+	if n := row0("PRUEBA DESDE GO Row 1"); n <=0 {
 		t.Errorf("error: %s", n)
 	}
 
-	row2 := m.TextColRow(0,3)
+	rowX := m.TextColRow(0,3)
 
-	if n := row2("PRUEBA DESDE GO Row 3!!!"); n <=0 {
+	m.Font(1)
+
+	if n := rowX("PRUEBA DESDE GO Row 3"); n <=0 {
 		t.Errorf("error: %s", n)
 	}
 	t.Log("Stop Logs")
@@ -36,7 +42,7 @@ func TestTextRow(t *testing.T) {
 /**
 func TestBitmapUpload(t *testing.T) {
 	t.Log("Start Logs")
-	config := &PortOptions{Port: "/dev/ttyUSB0", Baud: 19200}
+	config := &PortOptions{Port: "/dev/ttyUSB1", Baud: 19200}
         m := NewDisplay(config)
 
 	if ok := m.Open(); !ok {
@@ -57,7 +63,7 @@ func TestBitmapUpload(t *testing.T) {
 /**
 func TestBitmapDrawFile(t *testing.T) {
 	t.Log("Start Logs")
-	config := &PortOptions{Port: "/dev/ttyUSB0", Baud: 19200}
+	config := &PortOptions{Port: "/dev/ttyUSB1", Baud: 19200}
         m := NewDisplay(config)
 
 	if ok := m.Open(); !ok {
@@ -78,7 +84,7 @@ func TestBitmapDrawFile(t *testing.T) {
 
 func TestBitmapDraw(t *testing.T) {
 	t.Log("Start Logs")
-	config := &PortOptions{Port: "/dev/ttyUSB0", Baud: 19200}
+	config := &PortOptions{Port: "/dev/ttyUSB1", Baud: 19200}
         m := NewDisplay(config)
 
 	if ok := m.Open(); !ok {
@@ -100,7 +106,7 @@ func TestBitmapDraw(t *testing.T) {
 
 func TestBitmapDrawData(t *testing.T) {
 	t.Log("Start Logs")
-	config := &PortOptions{Port: "/dev/ttyUSB0", Baud: 19200}
+	config := &PortOptions{Port: "/dev/ttyUSB1", Baud: 19200}
         m := NewDisplay(config)
 
 	if ok := m.Open(); !ok {
@@ -142,7 +148,7 @@ func TestBitmapDrawData(t *testing.T) {
 
 func TestBuzzerActive(t *testing.T) {
 	t.Log("Start Logs")
-	config := &PortOptions{Port: "/dev/ttyUSB0", Baud: 19200}
+	config := &PortOptions{Port: "/dev/ttyUSB1", Baud: 19200}
         m := NewDisplay(config)
 
 	if ok := m.Open(); !ok {
@@ -162,11 +168,11 @@ func TestBuzzerActive(t *testing.T) {
 
 	t.Log("Stop Logs")
 }
-/**/
+/**
 
 func TestBackLigthOffOn(t *testing.T) {
 	t.Log("Start Logs")
-	config := &PortOptions{Port: "/dev/ttyUSB0", Baud: 19200}
+	config := &PortOptions{Port: "/dev/ttyUSB2", Baud: 19200}
         m := NewDisplay(config)
 
 	if ok := m.Open(); !ok {
@@ -193,7 +199,7 @@ func TestBackLigthOffOn(t *testing.T) {
 
 func TestBackLigthOffOn(t *testing.T) {
 	t.Log("Start Logs")
-	config := &PortOptions{Port: "/dev/ttyUSB0", Baud: 19200}
+	config := &PortOptions{Port: "/dev/ttyUSB1", Baud: 19200}
         m := NewDisplay(config)
 
 	if ok := m.Open(); !ok {
@@ -216,3 +222,42 @@ func TestBackLigthOffOn(t *testing.T) {
 	t.Log("Stop Logs")
 }
 /**/
+
+/**/
+func TestTextWindow(t *testing.T) {
+	t.Log("Start Logs")
+	config := &PortOptions{Port: "/dev/ttyUSB2", Baud: 19200}
+        m := NewDisplay(config)
+
+	if ok := m.Open(); !ok {
+                t.Error("Not connection")
+        }
+	defer m.Close()
+
+	m.ClrScreen()
+	/**/
+	id := 1
+	x1 := 1
+	y1 := 32
+	x2 := 189
+	y2 := 62
+	font := 1
+	charSpace := 1
+	lineSpace := 1
+	scroll := 62
+
+	m.InitTextWindow(id, x1, y1, x2, y2, font, charSpace, lineSpace, scroll)
+	m.SetTextWindow(id)
+
+	slice := []int{0, 1, 2, 3, 4, 5, 6, 7, 8}
+	s1 := make([]string,0)
+	for _, v := range slice {
+		s1 = append(s1,fmt.Sprintf("hola mundo %d!!!", v))
+	}
+	m.Text(strings.Join(s1, "\n"))
+	/**/
+
+	m.Rectangle(1, 0, 30, 190, 63)
+	t.Log("Stop Logs")
+}
+
