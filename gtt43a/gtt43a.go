@@ -5,7 +5,7 @@ import (
 	"github.com/tarm/serial"
 	"sync"
 	"time"
-	"os"
+	_ "os"
 	"fmt"
 	"encoding/binary"
 )
@@ -20,29 +20,32 @@ type Display interface {
 	Open()			bool
 	Close()			bool
 	ClrScreen()		int
-	ClrWindow(int)		int
 	Text(string)		int
+	FontSize(int)		int
 	Send([]byte)		int
 	SendRecv([]byte, bool)	(int, []byte)
-	ColRow(int, int)	int
-	TextColRow(int, int)	func(string) int
-	BitmapUpload(int, string) (int, error)
-	BitmapDraw(int, int, int) int
-	BitmapDrawFile(int, int, string) (int, error)
-	BitmapDrawData(int, int, []byte) int
-	BuzzerActive(int, int) int
-	BackLigthOff() int
-	BackLigthON(int) int
-	Led(int, int) int
-	KeyPadOff()	int
-	KeyPadON(int)	int
-	Font(int)	int
-	InitTextWindow(int, int, int, int, int, int, int, int, int) int
-	SetTextWindow(int) int
-	Rectangle(int, int, int, int, int) int
-	WriteScratch(int, []byte) int
-	ReadScratch(int, int) (int, []byte)
-	AutoTransmKey(bool) int
+	Echo([]byte)		(int, []byte)
+	SendRecvCmd(int, []byte, bool)	(int, []byte)
+	SendCmd(int, []byte)	int
+	Reset()			int
+	TextInsertPoint(int, int)	(int)
+	GetTextPoint()			(int, []byte)
+	TextPoint(int, int) func(data string) int
+	TextWindow(int, int, int, int)	int
+	TextColour(int, int, int)	int
+	PrintUTF8String(string)		int
+	PrintUnicodeString(string)	int
+	UpdateLabel(id, format int, value string) int
+	UpdateLabelAscii(int,string)	int
+	UpdateLabelUTF8(int, string)	int
+	UpdateLabelUnicode(int, string) int
+	UpdateBargraphValue(int, int)	(int, []byte)
+	UpdateTraceValue(int, int)	int
+	RunScript(string)		int
+	LoadBitmap(int, string)		(int, []byte)
+	BuzzerActive(frec, time int) (int)
+	WriteScratch(addr int, data []byte) (int)
+	ReadScratch(addr, size int) (int, []byte)
 
 }
 
@@ -107,10 +110,8 @@ func (m *display) Close() bool {
         return true
 }
 
-func (m *display) sendRecv(data []byte, recv bool) (int, []byte) {
+func (m *display) SendRecv(data []byte, recv bool) (int, []byte) {
 	m.mux.Lock()
-	prefix := data[0]
-	cmd := data[1]
 	res := make([]byte,0)
 	defer m.mux.Unlock()
 
@@ -139,41 +140,43 @@ func (m *display) sendRecv(data []byte, recv bool) (int, []byte) {
 }
 
 func (m *display) Send(data []byte) (int) {
-	n, _ := m.sendRecv(data, false)
+	n, _ := m.SendRecv(data, false)
 	return n
 }
 
 func (m *display) SendRecvCmd(cmd int, data []byte, recv bool) (int, []byte) {
 	dat1 := []byte{0xFE, byte(cmd)}
 	if data != nil {
-		dat1 = append(data, data...)
+		dat1 = append(dat1, data...)
 	}
 
-	n, res := sendRecv(dat1, recv)
+	n, res := m.SendRecv(dat1, recv)
 
 	switch  {
 	case n <= 0:
 		return -1, nil
-	case res == nil:
+	case recv && res == nil:
 		return -2, nil
-	case len(res) < 4:
+	case recv && len(res) < 4 :
 		return -3, nil
-	case res[0] != 0xFE:
+	case recv && res[0] != 0xFE:
 		return -4, nil
-	case res[1] != byte(cmd):
+	case recv && res[1] != byte(cmd):
 		return -5, nil
 	}
 	return n, res
 }
 
 func (m *display) SendCmd(cmd int, data []byte) int {
-	dat1 := []byte{0xFE, byte(cmd)}
-
-	n, _ := SendRecvCmd(dat1, nil, false)
+	n, _ := m.SendRecvCmd(cmd, data, false)
 	return n
 }
 
-func (m *display) Reset(data []byte) (int) {
+func (m *display) Echo(data []byte) (int, []byte) {
+	return m.SendRecvCmd(0xFF, data, true)
+}
+
+func (m *display) Reset() (int) {
 	n := m.Send([]byte{0xFE, 0x01})
 	return n
 }
@@ -182,6 +185,10 @@ func (m *display) Reset(data []byte) (int) {
 func (m *display) Text(data string) (int) {
 	n := m.Send([]byte(data))
 	return n
+}
+
+func (m *display) FontSize(size int) (int) {
+	return m.SendCmd(0x33, []byte{byte(size)})
 }
 
 func (m *display) TextInsertPoint(x, y int) (int) {
@@ -196,12 +203,12 @@ func (m *display) TextInsertPoint(x, y int) (int) {
 	return n
 }
 
-func (m *display) GetTextPoint(x, y int) (int, []byte) {
-	return SendRecvCmd(0x7A, nil)
+func (m *display) GetTextPoint() (int, []byte) {
+	return m.SendRecvCmd(0x7A, nil, true)
 }
 
 func (m *display) ClrScreen() (int) {
-	return m.SendCmd(0x58)
+	return m.SendCmd(0x58, nil)
 }
 
 func (m *display) TextPoint(x, y int) func(data string) int {
@@ -210,8 +217,7 @@ func (m *display) TextPoint(x, y int) func(data string) int {
 		if n <= 0 {
 			return n
 		}
-		buf = append(buf, []byte(data)...)
-		n = m.Send(buf)
+		n = m.Send([]byte(data))
 		return n
 	}
 }
@@ -231,53 +237,125 @@ func (m *display) TextWindow(x, y, width, height int) int {
 	data = append(data, widthb...)
 	data = append(data, heightb...)
 
-	return SendCmd(0x2B, data)
+	return m.SendCmd(0x2B, data)
 }
 
-func (m *display) TextColour(r, g, b) int {
-	data := []byte{byte(r), byte(g),byte(b)}
+func (m *display) TextColour(r, g, b int) int {
+	data := []byte{byte(r), byte(g), byte(b)}
 
-	return SendCmd(0x2E, data)
+	return m.SendCmd(0x2E, data)
 }
 
+func (m *display) PrintUTF8String(text string) int {
 
+	return m.SendCmd(0x25, []byte(text))
+}
+
+func (m *display) PrintUnicodeString(text string) int {
+
+	return m.SendCmd(0x24, []byte(text))
+}
 
 func (m *display) UpdateLabel(id, format int, value string) int  {
-	data := []byte{byte(id), byte(formta)}
+	data := []byte{byte(id), byte(format)}
 	data = append(data, []byte(value)...)
+	data = append(data, 0x00)
 
-	return SendCmd(data)
+	return m.SendCmd(0x11, data)
 }
 
-func (m *display) UpdateLabelAscii(id, value string) int  {
-	return UpdateLabel(id, 0, value)
+func (m *display) UpdateLabelAscii(id int, value string) int  {
+	return m.UpdateLabel(id, 0, value)
 }
 
-func (m *display) UpdateLabelUTF8(id, value string) int  {
-	return UpdateLabel(id, 2, value)
+func (m *display) UpdateLabelUTF8(id int, value string) int  {
+	return m.UpdateLabel(id, 2, value)
 }
 
-func (m *display) UpdateLabelUnicode(id, value string) int  {
-	return UpdateLabel(id, 1, value)
+func (m *display) UpdateLabelUnicode(id int, value string) int  {
+	return m.UpdateLabel(id, 1, value)
+}
+
+func (m *display) UpdateBargraphValue(id, value int) (int, []byte)  {
+	data := []byte{byte(id)}
+	valueb := make([]byte, 2)
+	binary.BigEndian.PutUint16(valueb, uint16(value))
+
+	data = append(data, valueb...)
+
+	return m.SendRecvCmd(0x69, data, true)
+}
+
+func (m *display) UpdateTraceValue(id, value int) int  {
+	data := []byte{byte(id)}
+	valueb := make([]byte, 2)
+	binary.BigEndian.PutUint16(valueb, uint16(value))
+
+	data = append(data, valueb...)
+
+	return m.SendCmd(0x75, data)
 }
 
 
+func (m *display) RunScript(filename string) int {
+	data := []byte(filename)
+	data = append(data, 0x00)
+	n1, _ := m.SendRecvCmd(0x5D, data, false)
+	//fmt.Printf("salida Run: %v\n", res)
+	return n1
+}
 
-/**
+func (m *display) LoadBitmap(id int, filename string) (int, []byte) {
+	data := []byte(filename)
+	data = append(data, 0)
+	n1, res := m.SendRecvCmd(0x5F, data, true)
+	fmt.Printf("salida Run: %v\n", res)
+	return n1, res
+}
+
+
 
 func (m *display) BuzzerActive(frec, time int) (int) {
 
 	data := []byte{0xFE, 0xBB}
 	frecb := make([]byte, 2)
 	timeb := make([]byte, 2)
-	binary.LittleEndian.PutUint16(frecb, uint16(frec))
-	binary.LittleEndian.PutUint16(timeb, uint16(time))
+	binary.BigEndian.PutUint16(frecb, uint16(frec))
+	binary.BigEndian.PutUint16(timeb, uint16(time))
 	data = append(data, frecb...)
 	data = append(data, timeb...)
 	n3 := m.Send(data)
 	return n3
 }
 
+func (m *display) WriteScratch(addr int, data []byte) (int) {
+	dat1 := []byte{0xFE, 0xCC}
+	addrb := make([]byte,2)
+	sizeb := make([]byte,2)
+	binary.BigEndian.PutUint16(addrb, uint16(addr))
+	binary.BigEndian.PutUint16(sizeb, uint16(len(data)))
+	dat1 = append(dat1, addrb...)
+	dat1 = append(dat1, sizeb...)
+	dat1 = append(dat1, data...)
+	n := m.Send(dat1)
+
+	return n
+}
+
+func (m *display) ReadScratch(addr, size int) (int, []byte) {
+	dat1 := []byte{0xFE, 0xCD}
+	addrb := make([]byte,2)
+	sizeb := make([]byte,2)
+	binary.BigEndian.PutUint16(addrb, uint16(addr))
+	binary.BigEndian.PutUint16(sizeb, uint16(size))
+	dat1 = append(dat1, addrb...)
+	dat1 = append(dat1, sizeb...)
+	n, datOut := m.SendRecv(dat1, true)
+
+	return n, datOut
+}
+
+/**
 func (m *display) BackLigthBrightness(int brightness) (int) {
 
 	data := []byte{0xFE, 0x99, byte(brightness)}
@@ -326,33 +404,6 @@ func (m *display) Rectangle(colour, x1, y1, x2, y2 int) int {
 
 	n1 := m.Send(data)
 	return n1
-}
-
-func (m *display) WriteScratch(addr int, data []byte) (int) {
-	dat1 := []byte{0xFE, 0xCC}
-	addrb := make([]byte,2)
-	sizeb := make([]byte,2)
-	binary.LittleEndian.PutUint16(addrb, uint16(addr))
-	binary.LittleEndian.PutUint16(sizeb, uint16(len(data)))
-	dat1 = append(dat1, addrb...)
-	dat1 = append(dat1, sizeb...)
-	dat1 = append(dat1, data...)
-	n := m.Send(dat1)
-
-	return n
-}
-
-func (m *display) ReadScratch(addr, size int) (int, []byte) {
-	dat1 := []byte{0xFE, 0xCD}
-	addrb := make([]byte,2)
-	sizeb := make([]byte,2)
-	binary.LittleEndian.PutUint16(addrb, uint16(addr))
-	binary.LittleEndian.PutUint16(sizeb, uint16(size))
-	dat1 = append(dat1, addrb...)
-	dat1 = append(dat1, sizeb...)
-	n, datOut := m.SendRecv(dat1, true)
-
-	return n, datOut
 }
 
 func (m *display) AutoTransmKey(on bool) (int) {

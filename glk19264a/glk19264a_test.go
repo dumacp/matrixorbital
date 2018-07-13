@@ -4,8 +4,8 @@ package glk19264a
 import (
 	"fmt"
 	"testing"
-	"strings"
-	_ "time"
+	_ "strings"
+	"time"
 )
 
 /**
@@ -223,10 +223,10 @@ func TestBackLigthOffOn(t *testing.T) {
 }
 /**/
 
-/**/
+/**
 func TestTextWindow(t *testing.T) {
 	t.Log("Start Logs")
-	config := &PortOptions{Port: "/dev/ttyUSB2", Baud: 19200}
+	config := &PortOptions{Port: "/dev/ttyUSB1", Baud: 19200}
         m := NewDisplay(config)
 
 	if ok := m.Open(); !ok {
@@ -235,7 +235,6 @@ func TestTextWindow(t *testing.T) {
 	defer m.Close()
 
 	m.ClrScreen()
-	/**/
 	id := 1
 	x1 := 1
 	y1 := 32
@@ -255,9 +254,31 @@ func TestTextWindow(t *testing.T) {
 		s1 = append(s1,fmt.Sprintf("hola mundo %d!!!", v))
 	}
 	m.Text(strings.Join(s1, "\n"))
-	/**/
 
 	m.Rectangle(1, 0, 30, 190, 63)
 	t.Log("Stop Logs")
 }
+/**/
 
+func TestKeyWindow(t *testing.T) {
+	t.Log("Start Logs")
+	config := &PortOptions{Port: "/dev/ttyUSB1", Baud: 19200}
+        m := NewDisplay(config)
+
+	if ok := m.Open(); !ok {
+                t.Error("Not connection")
+        }
+	defer m.Close()
+
+	m.ClrScreen()
+
+	for {
+		if input := m.PollKey(); len(input) > 0 {
+			m.Text(fmt.Sprintf("la tecla es: %v", input[0]))
+			fmt.Printf("la tecla es: %v\n", input)
+		}
+
+		time.Sleep(time.Second * 3)
+	}
+}
+		

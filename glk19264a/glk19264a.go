@@ -43,6 +43,7 @@ type Display interface {
 	WriteScratch(int, []byte) int
 	ReadScratch(int, int) (int, []byte)
 	AutoTransmKey(bool) int
+	PollKey() []int
 
 }
 
@@ -373,6 +374,35 @@ func (m *display) AutoTransmKey(on bool) (int) {
 	n := m.Send(dat1)
 
 	return n
+}
+
+func (m *display) PollKey() []int {
+	resp := make([]int,0)
+	dat1 := []byte{0xFE, 0x26}
+	n, datOut := m.SendRecv(dat1, true)
+	//fmt.Printf("data: % X, \nlen: %v\n", datOut, len(datOut))
+
+	if n <= 0 {
+		return nil
+	}
+
+	if datOut[0] > 0x00 {
+		resp = append(resp, int(datOut[0] & 0x7F))
+	} else {
+		return nil
+	}
+
+	if datOut[0] > 0x80 {
+		resp1 := make([]int,0)
+		for resp1 != nil {
+			resp1 = m.PollKey()
+			if resp1 != nil && len(resp1) > 0 {
+				resp = append(resp, resp1...)
+			}
+		}
+	}
+
+	return resp
 }
 
 
