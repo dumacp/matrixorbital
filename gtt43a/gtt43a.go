@@ -1,3 +1,6 @@
+/**
+Package to send commands and recieve response to and from gtt43a device.
+**/
 package gtt43a
 
 
@@ -68,6 +71,7 @@ const (
 	YELLOW
 )
 
+//Create a new Display device
 func NewDisplay(opt *PortOptions) Display {
 	disp := &display{}
 	disp.options = opt
@@ -76,6 +80,7 @@ func NewDisplay(opt *PortOptions) Display {
 	return disp
 }
 
+//Open device comunication channel
 func (m *display) Open() (bool) {
         if m.status == OPENED {
                 return true
@@ -98,6 +103,7 @@ func (m *display) Open() (bool) {
         return true
 }
 
+//Clsoe device comunication channel
 func (m *display) Close() bool {
         if m.status == CLOSED {
                 return true
@@ -110,6 +116,8 @@ func (m *display) Close() bool {
         return true
 }
 
+//Primitive function to send and recieve bytes to and from display device.
+//recv, flag to wait a response form device.
 func (m *display) SendRecv(data []byte, recv bool) (int, []byte) {
 	m.mux.Lock()
 	res := make([]byte,0)
@@ -139,11 +147,15 @@ func (m *display) SendRecv(data []byte, recv bool) (int, []byte) {
 	return n, res
 }
 
+//Send bytes data to device. Don't wait response.
 func (m *display) Send(data []byte) (int) {
 	n, _ := m.SendRecv(data, false)
 	return n
 }
 
+//Send a command to display device
+//cmd, id for the command
+//recv, flag to wait response
 func (m *display) SendRecvCmd(cmd int, data []byte, recv bool) (int, []byte) {
 	dat1 := []byte{0xFE, byte(cmd)}
 	if data != nil {
@@ -167,30 +179,35 @@ func (m *display) SendRecvCmd(cmd int, data []byte, recv bool) (int, []byte) {
 	return n, res
 }
 
+//Send a Command to display device.
 func (m *display) SendCmd(cmd int, data []byte) int {
 	n, _ := m.SendRecvCmd(cmd, data, false)
 	return n
 }
 
+//Send echo data and to wait for a response.
 func (m *display) Echo(data []byte) (int, []byte) {
 	return m.SendRecvCmd(0xFF, data, true)
 }
 
+//Send reset command to display device
 func (m *display) Reset() (int) {
 	n := m.Send([]byte{0xFE, 0x01})
 	return n
 }
 
-
+//Print text data in actual (x,y) point in display area
 func (m *display) Text(data string) (int) {
 	n := m.Send([]byte(data))
 	return n
 }
 
+//Set font Size
 func (m *display) FontSize(size int) (int) {
 	return m.SendCmd(0x33, []byte{byte(size)})
 }
 
+//Set (x,y) point in display area. The next print and draw command will be set in this point.
 func (m *display) TextInsertPoint(x, y int) (int) {
 	data := make([]byte,0)
 	xb := make([]byte,2)
@@ -203,14 +220,17 @@ func (m *display) TextInsertPoint(x, y int) (int) {
 	return n
 }
 
+//Get actual (x,y) point
 func (m *display) GetTextPoint() (int, []byte) {
 	return m.SendRecvCmd(0x7A, nil, true)
 }
 
+//Clear actual Screen
 func (m *display) ClrScreen() (int) {
 	return m.SendCmd(0x58, nil)
 }
 
+//Print data text in this (x,y) point
 func (m *display) TextPoint(x, y int) func(data string) int {
 	return func (data string) (int) {
 		n := m.TextInsertPoint(x, y)
@@ -222,6 +242,7 @@ func (m *display) TextPoint(x, y int) func(data string) int {
 	}
 }
 
+//Set (x,y) point for the all future text in the actual windowText
 func (m *display) TextWindow(x, y, width, height int) int {
 	data := make([]byte,0)
 	xb := make([]byte,2)
@@ -240,23 +261,27 @@ func (m *display) TextWindow(x, y, width, height int) int {
 	return m.SendCmd(0x2B, data)
 }
 
+//Set the colour for the all future text and label string.
 func (m *display) TextColour(r, g, b int) int {
 	data := []byte{byte(r), byte(g), byte(b)}
 
 	return m.SendCmd(0x2E, data)
 }
 
+//Print the text data in UTF-8 codification
 func (m *display) PrintUTF8String(text string) int {
 
 	return m.SendCmd(0x25, []byte(text))
 }
 
-func (m *display) PrintUnicodeString(text string) int {
+//Print the data bytes in Unicode (16 bits length) codification
+func (m *display) PrintUnicode(data []byte) int {
 
-	return m.SendCmd(0x24, []byte(text))
+	return m.SendCmd(0x24, data)
 }
 
-func (m *display) UpdateLabel(id, format int, value string) int  {
+//Update the text data (in bytes) in the label ID
+func (m *display) UpdateLabel(id, format int, value []byte) int  {
 	data := []byte{byte(id), byte(format)}
 	data = append(data, []byte(value)...)
 	data = append(data, 0x00)
@@ -264,18 +289,22 @@ func (m *display) UpdateLabel(id, format int, value string) int  {
 	return m.SendCmd(0x11, data)
 }
 
+//Update the text data (in string) in the label ID with Ascii Codification
 func (m *display) UpdateLabelAscii(id int, value string) int  {
-	return m.UpdateLabel(id, 0, value)
+	return m.UpdateLabel(id, 0, []byte(value))
 }
 
+//Update the text data (in string) in the label ID with UTF-8 Codification
 func (m *display) UpdateLabelUTF8(id int, value string) int  {
-	return m.UpdateLabel(id, 2, value)
+	return m.UpdateLabel(id, 2, []byte(value))
 }
 
-func (m *display) UpdateLabelUnicode(id int, value string) int  {
+//Update the text data (in bytes, 2 bytes for character) in the label ID with Unicode Codification
+func (m *display) UpdateLabelUnicode(id int, value []byte) int  {
 	return m.UpdateLabel(id, 1, value)
 }
 
+//Update value (%0 - %100) in bargraph object
 func (m *display) UpdateBargraphValue(id, value int) (int, []byte)  {
 	data := []byte{byte(id)}
 	valueb := make([]byte, 2)
@@ -286,6 +315,7 @@ func (m *display) UpdateBargraphValue(id, value int) (int, []byte)  {
 	return m.SendRecvCmd(0x69, data, true)
 }
 
+//Update value in trace object
 func (m *display) UpdateTraceValue(id, value int) int  {
 	data := []byte{byte(id)}
 	valueb := make([]byte, 2)
@@ -296,7 +326,7 @@ func (m *display) UpdateTraceValue(id, value int) int  {
 	return m.SendCmd(0x75, data)
 }
 
-
+//Run script binary. The filename path is a local path in display device
 func (m *display) RunScript(filename string) int {
 	data := []byte(filename)
 	data = append(data, 0x00)
@@ -305,6 +335,7 @@ func (m *display) RunScript(filename string) int {
 	return n1
 }
 
+//Load in display memory a bitmap object from filename. The filename path in a local in display device.
 func (m *display) LoadBitmap(id int, filename string) (int, []byte) {
 	data := []byte(filename)
 	data = append(data, 0)
@@ -313,8 +344,9 @@ func (m *display) LoadBitmap(id int, filename string) (int, []byte) {
 	return n1, res
 }
 
-
-
+//Active buzzer in device.
+//frec, is the frecuency of the signal
+//time, is the duration of the signal
 func (m *display) BuzzerActive(frec, time int) (int) {
 
 	data := []byte{0xFE, 0xBB}
@@ -354,68 +386,4 @@ func (m *display) ReadScratch(addr, size int) (int, []byte) {
 
 	return n, datOut
 }
-
-/**
-func (m *display) BackLigthBrightness(int brightness) (int) {
-
-	data := []byte{0xFE, 0x99, byte(brightness)}
-	n3 := m.Send(data)
-	return n3
-}
-
-func (m *display) Font(id int) (int) {
-	data := []byte{0xFE, 0x31, byte(id)}
-	n3, _ := m.SendRecv(data)
-	return n3
-}
-
-func (m *display) TextWindow(x, y, width, height int) int {
-	data := []byte{0xFE, 0x2B}
-	xb := make([]byte,2)
-	yb := make([]byte,2)
-	widthb := make([]byte,2)
-	heightb := make([]byte,2)
-	binary.LittleEndian.Putint16(xb, uint16(x))
-	binary.LittleEndian.Putint16(yb, uint16(y))
-	binary.LittleEndian.Putint16(widthb, uint16(width))
-	binary.LittleEndian.Putint16(heightb, uint16(height))
-	data = append(data, xb...)
-	data = append(data, yb...)
-	data = append(data, widthb...)
-	data = append(data, heightb...)
-
-	n1 := m.Send(data)
-	return n1
-}
-
-func (m *display) SetTextWindow(id int) (int) {
-	data := []byte{0xFE, 0x2A, byte(id)}
-	n1 := m.Send(data)
-        return n1
-}
-
-func (m *display) ClrWindow(id int) (int) {
-	n := m.Send([]byte{0xFE, 0x2C, byte(id)})
-	return n
-}
-
-func (m *display) Rectangle(colour, x1, y1, x2, y2 int) int {
-	data := []byte{0xFE, 0x72, byte(colour), byte(x1), byte(y1), byte(x2), byte(y2)}
-
-	n1 := m.Send(data)
-	return n1
-}
-
-func (m *display) AutoTransmKey(on bool) (int) {
-	var dat1 []byte
-	if on {
-		dat1 = []byte{0xFE, 0x41}
-	} else {
-		dat1 = []byte{0xFE, 0x4F}
-	}
-	n := m.Send(dat1)
-
-	return n
-}
-/**/
 
