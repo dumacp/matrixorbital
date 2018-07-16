@@ -1,3 +1,6 @@
+/**
+Package to send commands and recieve response to and from glk19264a device.
+**/
 package glk19264a
 
 
@@ -10,7 +13,7 @@ import (
 	"encoding/binary"
 )
 
-
+//Options to open comunication channel with device
 type PortOptions struct {
         Port    string
         Baud    int
@@ -66,6 +69,7 @@ const (
 	YELLOW
 )
 
+//Create a new display
 func NewDisplay(opt *PortOptions) Display {
 	disp := &display{}
 	disp.options = opt
@@ -74,6 +78,7 @@ func NewDisplay(opt *PortOptions) Display {
 	return disp
 }
 
+//Open communication channel with display device
 func (m *display) Open() (bool) {
         if m.status == OPENED {
                 return true
@@ -96,6 +101,7 @@ func (m *display) Open() (bool) {
         return true
 }
 
+//Close communication channel with display device
 func (m *display) Close() bool {
         if m.status == CLOSED {
                 return true
@@ -108,6 +114,12 @@ func (m *display) Close() bool {
         return true
 }
 
+/**
+Primitive function to send and recieve bytes to device.
+data, is the bytes to send to device
+recv, is a flag to wait response
+The function return the count number the bytes in response and the slice with the response.
+**/
 func (m *display) SendRecv(data []byte, recv bool) (int, []byte) {
 	m.mux.Lock()
 	res := make([]byte,0)
@@ -136,27 +148,32 @@ func (m *display) SendRecv(data []byte, recv bool) (int, []byte) {
 	return n, res
 }
 
+//Function to only send bytes to device. Don't wait response.
+//The function return the count number of bytes wrote in the buffer of serial device.
 func (m *display) Send(data []byte) (int) {
 	n, _ := m.SendRecv(data, false)
 	return n
 }
 
-
+//Function to print data string in display. The text is to print in actual (col,row) point.
 func (m *display) Text(data string) (int) {
 	n := m.Send([]byte(data))
 	return n
 }
 
+//Function to set (col,row) point in the display area.
 func (m *display) ColRow(col, row int) (int) {
 	n := m.Send([]byte{0xFE, 0x47, byte(col), byte(row)})
 	return n
 }
 
+//Function to clear display area and set actual window to 0 (zero)
 func (m *display) ClrScreen() (int) {
 	n := m.Send([]byte{0xFE, 0x58})
 	return n
 }
 
+//Function to set (col,row) point and print text in display from that point
 func (m *display) TextColRow(col, row int) func(data string) int {
 	return func (data string) (int) {
 		buf := []byte{0xFE, 0x47, byte(col), byte(row)}
@@ -166,6 +183,10 @@ func (m *display) TextColRow(col, row int) func(data string) int {
 	}
 }
 
+/**
+Function to load bitmap in the buffer display
+id, is the ID of the bitmap in the memory display
+**/
 func (m *display) BitmapUpload(id int, filename string) (int, error) {
 	file, err1 := os.Open(filename)
 	if err1 != nil {
@@ -201,20 +222,22 @@ func (m *display) BitmapUpload(id int, filename string) (int, error) {
 	return n5, nil
 }
 
-func (m *display) BitmapDraw(x, y, id int) (int) {
+//Function to print the bitmap identify with id in the memory in display 
+func (m *display) BitmapDraw(col, row, id int) (int) {
 	data := []byte{0xFE, 0x62}
 	idb := make([]byte, 2)
 	binary.LittleEndian.PutUint16(idb, uint16(id))
 	data = append(data, idb...)
-	data = append(data, byte(x))
-	data = append(data, byte(y))
+	data = append(data, byte(col))
+	data = append(data, byte(row))
 	//fmt.Printf("data: % X, \nlen: %v\n", data, len(data))
 
 	n3 := m.Send(data)
 	return n3
 }
 
-func (m *display) BitmapDrawFile(x, y int, filename string) (int, error) {
+//Function to print bitmap in display from a filename path
+func (m *display) BitmapDrawFile(col, row int, filename string) (int, error) {
 	file, err1 := os.Open(filename)
 	if err1 != nil {
 		return 0, err1
@@ -227,8 +250,8 @@ func (m *display) BitmapDrawFile(x, y int, filename string) (int, error) {
 	}
 
 	data := []byte{0xFE, 0x64}
-	data = append(data, byte(x))
-	data = append(data, byte(y))
+	data = append(data, byte(col))
+	data = append(data, byte(row))
 	data = append(data, b[:n2]...)
 	fmt.Printf("data: %v, \nlen: %v\n", data, len(data))
 
@@ -249,6 +272,9 @@ func (m *display) BitmapDrawData(x, y int, dat []byte) (int) {
 	return n3
 }
 
+//Function to active the buzzer device
+//frec, is the frecuency of the signal 
+//time, is the duration time of the signal
 func (m *display) BuzzerActive(frec, time int) (int) {
 
 	data := []byte{0xFE, 0xBB}
@@ -262,6 +288,7 @@ func (m *display) BuzzerActive(frec, time int) (int) {
 	return n3
 }
 
+//Function to OFF the backlight
 func (m *display) BackLigthOff() (int) {
 
 	data := []byte{0xFE, 0x46}
@@ -269,6 +296,7 @@ func (m *display) BackLigthOff() (int) {
 	return n3
 }
 
+//Function to ON the backlight
 func (m *display) BackLigthON(min int) (int) {
 
 	data := []byte{0xFE, 0x42, byte(min)}
@@ -276,6 +304,7 @@ func (m *display) BackLigthON(min int) (int) {
 	return n3
 }
 
+//Function to assign a color to LED, id is the identity number of LED
 func (m *display) Led(num, color int) (int) {
 
 	data := []byte{0xFE, 0x5A, byte(num), byte(color)}
@@ -283,6 +312,7 @@ func (m *display) Led(num, color int) (int) {
 	return n3
 }
 
+//Function to OFF keypad light
 func (m *display) KeyPadOff() (int) {
 
 	data := []byte{0xFE, 0x9B}
@@ -290,6 +320,7 @@ func (m *display) KeyPadOff() (int) {
 	return n3
 }
 
+//Function to ON keypad light
 func (m *display) KeyPadON(level int) (int) {
 
 	data := []byte{0xFE, 0x9C, byte(level)}
@@ -297,6 +328,7 @@ func (m *display) KeyPadON(level int) (int) {
 	return n3
 }
 
+//Function to set FONT
 func (m *display) Font(id int) (int) {
 	data := []byte{0xFE, 0x31}
 	idb := make([]byte, 2)
@@ -306,6 +338,7 @@ func (m *display) Font(id int) (int) {
 	return n3
 }
 
+//Function to create a window text
 func (m *display) InitTextWindow(id, x1, y1, x2, y2, font, charSpace, lineSpace, scroll int) int {
 	data := []byte{0xFE, 0x2B, byte(id), byte(x1), byte(y1), byte(x2), byte(y2)}
 	fontb := make([]byte,2)
@@ -319,17 +352,20 @@ func (m *display) InitTextWindow(id, x1, y1, x2, y2, font, charSpace, lineSpace,
 	return n1
 }
 
+//Function to set the actual window text
 func (m *display) SetTextWindow(id int) (int) {
 	data := []byte{0xFE, 0x2A, byte(id)}
 	n1 := m.Send(data)
         return n1
 }
 
+//Function to clear window identify with id number
 func (m *display) ClrWindow(id int) (int) {
 	n := m.Send([]byte{0xFE, 0x2C, byte(id)})
 	return n
 }
 
+//Function to print a rectangle in display area
 func (m *display) Rectangle(colour, x1, y1, x2, y2 int) int {
 	data := []byte{0xFE, 0x72, byte(colour), byte(x1), byte(y1), byte(x2), byte(y2)}
 
@@ -337,6 +373,7 @@ func (m *display) Rectangle(colour, x1, y1, x2, y2 int) int {
 	return n1
 }
 
+//Function to write scratch data in the display memory. This data is inthe volatile memory
 func (m *display) WriteScratch(addr int, data []byte) (int) {
 	dat1 := []byte{0xFE, 0xCC}
 	addrb := make([]byte,2)
@@ -351,6 +388,7 @@ func (m *display) WriteScratch(addr int, data []byte) (int) {
 	return n
 }
 
+//Function to read scratch data in the display memory.
 func (m *display) ReadScratch(addr, size int) (int, []byte) {
 	dat1 := []byte{0xFE, 0xCD}
 	addrb := make([]byte,2)
@@ -364,6 +402,7 @@ func (m *display) ReadScratch(addr, size int) (int, []byte) {
 	return n, datOut
 }
 
+//Function to enable transmit bytes from display device in event key button.
 func (m *display) AutoTransmKey(on bool) (int) {
 	var dat1 []byte
 	if on {
@@ -376,6 +415,7 @@ func (m *display) AutoTransmKey(on bool) (int) {
 	return n
 }
 
+//Function to read key button state
 func (m *display) PollKey() []int {
 	resp := make([]int,0)
 	dat1 := []byte{0xFE, 0x26}
