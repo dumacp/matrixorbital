@@ -37,11 +37,11 @@ type Display interface {
 	TextWindow(int, int, int, int)	int
 	TextColour(int, int, int)	int
 	PrintUTF8String(string)		int
-	PrintUnicodeString(string)	int
-	UpdateLabel(id, format int, value string) int
+	PrintUnicode([]byte)	int
+	UpdateLabel(id, format int, value []byte) int
 	UpdateLabelAscii(int,string)	int
 	UpdateLabelUTF8(int, string)	int
-	UpdateLabelUnicode(int, string) int
+	UpdateLabelUnicode(int, []byte) int
 	UpdateBargraphValue(int, int)	(int, []byte)
 	UpdateTraceValue(int, int)	int
 	RunScript(string)		int
