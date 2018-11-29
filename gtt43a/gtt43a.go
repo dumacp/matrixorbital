@@ -89,7 +89,7 @@ func (m *display) Open() (bool) {
         config := &serial.Config{
                 Name:   m.options.Port,
                 Baud:   m.options.Baud,
-                ReadTimeout:    1 * time.Second,
+                ReadTimeout:    60 * time.Millisecond,
         }
 
         var err error
@@ -121,30 +121,36 @@ func (m *display) Close() bool {
 func (m *display) SendRecv(data []byte, recv bool) (int, []byte) {
 	m.mux.Lock()
 	res := make([]byte,0)
+	n := -1
 	defer m.mux.Unlock()
 
 	if m.status == CLOSED {
 		return -1, nil
 	}
-	n, err := m.port.Write(data)
-	if err != nil {
-		return -1, nil
+	if data != nil {
+		n, err := m.port.Write(data)
+		if err != nil {
+			return -1, nil
+		}
+		if n <= 0 {
+			return n, nil
+		}
+		if !recv {
+			return n, nil
+		}
 	}
-	if n <= 0 {
-		return n, nil
+
+	var err error
+	for {
+		buf := make([]byte,128)
+		n, err = m.port.Read(buf)
+		if err != nil && n <=0 {
+			//fmt.Println(err)
+			break
+		}
+		res = append(res,buf[:n]...)
 	}
-
-	if !recv {
-		return n, nil
-	}
-
-	buf := make([]byte,128)
-	n, _ = m.port.Read(buf)
-
-	res = append(res,buf[:n]...)
-
-
-	return n, res
+	return len(res), res
 }
 
 //Send bytes data to device. Don't wait response.
@@ -359,6 +365,14 @@ func (m *display) BuzzerActive(frec, time int) (int) {
 	n3 := m.Send(data)
 	return n3
 }
+
+//TOUCH
+
+//Create a touch region
+//regId, region ID
+//x, y, coordinate of the touch region
+//width, width of the region
+//height, height of the region
 
 func (m *display) WriteScratch(addr int, data []byte) (int) {
 	dat1 := []byte{0xFE, 0xCC}
