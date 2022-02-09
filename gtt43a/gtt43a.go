@@ -73,6 +73,10 @@ type Display interface {
 	/**/
 	ChangeTouchReporting(style int) error
 	GetTouchReporting() ([]byte, error)
+
+	GetToggleState(id int) ([]byte, error)
+	GetSliderValue(id int) ([]byte, error)
+
 	WriteScratch(addr int, data []byte) error
 	ReadScratch(addr, size int) ([]byte, error)
 	Listen() error
@@ -108,8 +112,10 @@ const (
 )
 
 const (
-	timeoutRead time.Duration = 300
-	bufferLen   int           = 1024
+	timeoutRead   time.Duration = 300 * time.Millisecond
+	bufferLen     int           = 1024
+	minReadWait   time.Duration = 40 * time.Millisecond
+	maxCountError int           = 5
 )
 
 //Create a new Display device
@@ -164,23 +170,20 @@ func (m *display) Listen() error {
 	if m.status == LISTEN {
 		return fmt.Errorf("error: already Listening display")
 	}
-
 	if m.status != OPENED {
 		return fmt.Errorf("error: port serial is closed")
 	}
+	countError := 0
 	m.bufResp = make([]byte, 0)
 	m.chEvent = make(chan []byte, 3)
-	defer func() {
-		m.status = LISTEN
-	}()
 	log.Println("START listen")
 	ch := make(chan []byte)
 	go func() {
 		defer func() {
 			close(m.chEvent)
 			close(ch)
+			m.status = OPENED
 		}()
-
 		funcRead := func(v []byte) {
 			//log.Printf("read serial port: [% X]\n", v)
 			lenValue := 0
@@ -193,7 +196,7 @@ func (m *display) Listen() error {
 					msg = append(msg, v[4:lenValue+4]...)
 					select {
 					case m.chEvent <- msg:
-					case <-time.After(timeoutRead * time.Millisecond):
+					case <-time.After(timeoutRead):
 						// default:
 						log.Printf("evento ????X [% X]\n", msg)
 					}
@@ -206,7 +209,7 @@ func (m *display) Listen() error {
 					msg = append(msg, v[4:lenValue+4]...)
 					select {
 					case m.chEvent <- msg:
-					case <-time.After(timeoutRead * time.Millisecond):
+					case <-time.After(timeoutRead):
 						// default:
 						log.Printf("evento ????X [% X]\n", msg)
 					}
@@ -228,14 +231,19 @@ func (m *display) Listen() error {
 			/**/
 			select {
 			case <-m.stopListen:
-				m.status = OPENED
 				return
 			default:
 			}
 			/**/
 			//log.Printf("bajo nivel 1\n")
 			buf, err := m.recv()
-			if err != nil || len(buf) <= 0 {
+			if err != nil {
+				if countError >= maxCountError {
+					return
+				}
+				countError++
+			}
+			if len(buf) <= 0 {
 				continue
 			}
 			// //log.Printf("bajo nivel 2: len: %d, [% X]\n", len(res), res)
@@ -263,6 +271,7 @@ func (m *display) Listen() error {
 			// time.Sleep(20 * time.Millisecond)
 		}
 	}()
+	m.status = LISTEN
 	return nil
 }
 
@@ -278,8 +287,8 @@ func (m *display) StopListen() {
 //Primitive function to send and recieve bytes to and from display device.
 //recv, flag to wait a response form device.
 func (m *display) SendRecv(data []byte) ([]byte, error) {
-	m.muxSend.Lock()
-	defer m.muxSend.Unlock()
+	// m.muxSend.Lock()
+	// defer m.muxSend.Unlock()
 	// res := make([]byte, 0)
 	m.bufResp = make([]byte, 0)
 
@@ -311,8 +320,7 @@ func (m *display) SendRecv(data []byte) ([]byte, error) {
 
 //Send bytes data to device. Don't wait response.
 func (m *display) Send(data []byte) error {
-	m.muxSend.Lock()
-	defer m.muxSend.Unlock()
+
 	if m.status == CLOSED {
 		return fmt.Errorf("device CLOSED")
 	}
@@ -320,6 +328,8 @@ func (m *display) Send(data []byte) error {
 }
 
 func (m *display) send(data []byte) error {
+	m.muxSend.Lock()
+	defer m.muxSend.Unlock()
 	if data == nil {
 		return ErrorDevNull
 	}
@@ -346,7 +356,7 @@ func (m *display) Recv() ([]byte, error) {
 	//defer m.muxRecv.Unlock()
 	m.bufResp = make([]byte, 0)
 	if m.status == LISTEN {
-		tAfter := time.After(timeoutRead * time.Millisecond)
+		tAfter := time.After(timeoutRead)
 		tTick := time.NewTicker(10 * time.Millisecond)
 		defer tTick.Stop()
 		for {
@@ -383,9 +393,15 @@ func (m *display) recv() ([]byte, error) {
 	reader := bufio.NewReader(m.port)
 
 	buf := make([]byte, bufferLen)
+	tn := time.Now()
 	n, err := reader.Read(buf)
-	if !errors.Is(err, io.EOF) {
-		return nil, err
+	if err != nil {
+		if !errors.Is(err, io.EOF) {
+			return nil, err
+		}
+		if m.options.ReadTimeout > minReadWait && time.Since(tn) < minReadWait {
+			return nil, err
+		}
 	}
 	if n <= 0 {
 		return nil, nil
@@ -398,8 +414,8 @@ func (m *display) recv() ([]byte, error) {
 //cmd, id for the command
 //wait response
 func (m *display) SendRecvCmd(cmd int, data []byte) ([]byte, error) {
-	m.muxSend.Lock()
-	defer m.muxSend.Unlock()
+	// m.muxSend.Lock()
+	// defer m.muxSend.Unlock()
 	dat1 := []byte{0xFE, byte(cmd)}
 	if data != nil {
 		dat1 = append(dat1, data...)
@@ -413,7 +429,7 @@ func (m *display) SendRecvCmd(cmd int, data []byte) ([]byte, error) {
 
 	//log.Printf("request End: [% X]\n", dat1)
 	if m.status == LISTEN {
-		after := time.After(timeoutRead * time.Millisecond)
+		after := time.After(timeoutRead)
 		tick := time.NewTicker(10 * time.Millisecond)
 		defer tick.Stop()
 		m.bufResp = make([]byte, 0)
@@ -544,6 +560,14 @@ func (m *display) GetTouchReporting() ([]byte, error) {
 //width, width of the region
 //height, height of the region
 /**/
+
+func (m *display) GetToggleState(id int) ([]byte, error) {
+	return m.SendRecvCmd(171, []byte{byte(id & 0xFF)})
+}
+
+func (m *display) GetSliderValue(id int) ([]byte, error) {
+	return m.SendRecvCmd(167, []byte{byte(id & 0xFF)})
+}
 
 func (m *display) WriteScratch(addr int, data []byte) error {
 	dat1 := make([]byte, 0)

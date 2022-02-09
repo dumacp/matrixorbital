@@ -14,8 +14,8 @@ func TestAppDemo(t *testing.T) {
 	config := &PortOptions{Port: "/dev/ttyUSB0", Baud: 115200}
 	m := NewDisplay(config)
 
-	if ok := m.Open(); !ok {
-		t.Error("Not connection")
+	if err := m.Open(); err != nil {
+		t.Errorf("Not connection: %s", err)
 	}
 	defer m.Close()
 

@@ -32,7 +32,7 @@ func (m *display) Events() (chan *Event, error) {
 	if m.status != LISTEN {
 		return nil, fmt.Errorf("error, display don't be listenning. Execute Listen() before wait events")
 	}
-	mc := make(chan *Event, 10)
+	mc := make(chan *Event, 0)
 	go func() {
 		defer close(mc)
 		for v := range m.chEvent {
@@ -68,17 +68,17 @@ func (m *display) Events() (chan *Event, error) {
 				continue
 			}
 
-			go func(evnT EventType, objId uint16, data []byte) {
-				event := &Event{
-					evnT,
-					objId,
-					data,
-				}
-				select {
-				case mc <- event:
-				case <-time.After(timeoutRead * time.Millisecond):
-				}
-			}(evnT, objID, data)
+			// go func(evnT EventType, objId uint16, data []byte) {
+			event := &Event{
+				evnT,
+				objID,
+				data,
+			}
+			select {
+			case mc <- event:
+			case <-time.After(timeoutRead):
+			}
+			// }(evnT, objID, data)
 		}
 	}()
 	return mc, nil

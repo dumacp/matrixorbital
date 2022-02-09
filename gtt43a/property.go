@@ -16,6 +16,9 @@ var SliderValue GTT25PropertyType = []byte{0x0A, 0x08}
 var ButtonState GTT25PropertyType = []byte{0x15, 0x0C}
 var ButtonText GTT25PropertyType = []byte{0x15, 0x03}
 var SliderLabelText GTT25PropertyType = []byte{0x0A, 0x09}
+var CanFocus GTT25PropertyType = []byte{0x02, 0x05}
+var HasFocus GTT25PropertyType = []byte{0x02, 0x06}
+var Enabled GTT25PropertyType = []byte{0x02, 0x07}
 
 func (typeP GTT25PropertyType) Value() []byte {
 	return []byte(typeP)
