@@ -47,3 +47,43 @@ func (m *display) UpdateTraceValue(id, value int) error {
 
 	return m.SendCmd(0x75, data)
 }
+
+//Set backgroug value in trace object
+func (m *display) SetLabelBackgroundColour(id, r, g, b int) error {
+	data := make([]byte, 0)
+	data = append(data, byte(id))
+	data = append(data, byte(r))
+	data = append(data, byte(g))
+	data = append(data, byte(b))
+	_, err := m.SendRecvCmd(25, data)
+	return err
+}
+
+//Set backgroug value in trace object
+func (m *display) CreateLabelLegacy(id, x, y, width, height, h, v, font, r, g, b int) error {
+	data := make([]byte, 0)
+	data = append(data, byte(id))
+	xb := make([]byte, 2)
+	binary.BigEndian.PutUint16(xb, uint16(x))
+	data = append(data, xb...)
+	yb := make([]byte, 2)
+	binary.BigEndian.PutUint16(yb, uint16(y))
+	data = append(data, yb...)
+	widthb := make([]byte, 2)
+	binary.BigEndian.PutUint16(widthb, uint16(width))
+	data = append(data, widthb...)
+	heightb := make([]byte, 2)
+	binary.BigEndian.PutUint16(heightb, uint16(height))
+	data = append(data, heightb...)
+	data = append(data, []byte{0, 0}...)
+
+	data = append(data, byte(v))
+	data = append(data, byte(h))
+	data = append(data, byte(font))
+
+	data = append(data, byte(r))
+	data = append(data, byte(g))
+	data = append(data, byte(b))
+	_, err := m.SendRecvCmd(16, data)
+	return err
+}

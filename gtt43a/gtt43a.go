@@ -26,7 +26,7 @@ type PortOptions struct {
 
 type Display interface {
 	Open() error
-	Close() bool
+	Close() error
 	ClrScreen() error
 	Text(string) error
 	FontSize(int) error
@@ -50,11 +50,25 @@ type Display interface {
 	UpdateLabelAscii(int, string) error
 	UpdateLabelUTF8(int, string) error
 	UpdateLabelUnicode(int, []byte) error
+	SetLabelBackgroundColour(id, r, g, b int) error
+	CreateLabelLegacy(id, x, y, width, height, h, v, font, r, g, b int) error
 	UpdateBargraphValue(int, int) ([]byte, error)
 	UpdateTraceValue(int, int) error
 	RunScript(string) error
-	LoadBitmap(int, string) ([]byte, error)
+	LoadBitmapLegcay(id int, filename string) error
+	DisplayBitmapLegcay(id int, x, y int) error
+	ClearBitmapLegacy(id int) error
+	SetBitmapTransparencyLegacy(id int, r, g, b int) error
+	SetBacklightLegcay(brightness int) error
+
+	BitmapLoad(int, string) error
+	BitmapCapture(id int, left, top, width, height int) error
 	BuzzerActive(frec, time int) error
+	CreateObject(id int, objectType GTT25ObjectType) error
+	DestroyObject(id int) error
+	BaseObjectBeginUpdate(id int) error
+	BaseObjectEndUpdate(id int) error
+	ObjectListGet(id, itemIndex int) error
 	SetPropertyValueU16(id int, prpType GTT25PropertyType) func(value int) error
 	SetPropertyValueS16(id int, prpType GTT25PropertyType) func(value int) error
 	SetPropertyValueU8(id int, prpType GTT25PropertyType) func(value int) error
@@ -62,15 +76,8 @@ type Display interface {
 	GetPropertyValueU16(id int, prpType GTT25PropertyType) func() ([]byte, error)
 	GetPropertyValueS16(id int, prpType GTT25PropertyType) func() ([]byte, error)
 	GetPropertyValueU8(id int, prpType GTT25PropertyType) func() (byte, error)
-	/**
-	ApduSetPropertyValueU16(id int, prpType GTT25PropertyType, value int) []byte
-	ApduSetPropertyValueS16(id int, prpType GTT25PropertyType, value int) []byte
-	ApduSetPropertyValueU8(id int, prpType GTT25PropertyType, value int) []byte
-	ApduSetPropertyText(id int, prpType GTT25PropertyType, text string) []byte
-	ApduGetPropertyValueU16(id int, prpType GTT25PropertyType) []byte
-	ApduGetPropertyValueS16(id int, prpType GTT25PropertyType) []byte
-	ApduGetPropertyValueU8(id int, prpType GTT25PropertyType) []byte
-	/**/
+	GetPropertyText(id int, prpType GTT25PropertyType) func() ([]byte, error)
+
 	ChangeTouchReporting(style int) error
 	GetTouchReporting() ([]byte, error)
 
@@ -91,9 +98,10 @@ type display struct {
 	options *PortOptions
 	status  uint32
 	port    *serial.Port
-	muxSend sync.Mutex
+	mux     sync.Mutex
+	wmux    sync.Mutex
 	// muxRecv    sync.Mutex
-	bufResp    []byte
+	bufResp    chan []byte
 	chEvent    chan []byte
 	stopListen chan int
 }
@@ -112,9 +120,8 @@ const (
 )
 
 const (
-	timeoutRead   time.Duration = 300 * time.Millisecond
+	timeoutRead   time.Duration = 600 * time.Millisecond
 	bufferLen     int           = 1024
-	minReadWait   time.Duration = 40 * time.Millisecond
 	maxCountError int           = 5
 )
 
@@ -150,18 +157,27 @@ func (m *display) Open() error {
 }
 
 //Clsoe device comunication channel
-func (m *display) Close() bool {
+func (m *display) Close() error {
+	fmt.Println("CLOSE gtt43a")
 	defer func() {
 		m.status = CLOSED
 	}()
+	if m.stopListen != nil {
+		select {
+		case <-m.stopListen:
+		default:
+			close(m.stopListen)
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 	if m.port == nil {
-		return false
+		return nil
 	}
 	if err := m.port.Close(); err != nil {
-		return false
+		return err
 	}
 
-	return true
+	return nil
 }
 
 //Listen is a go rutine that listening serial port to detect messages
@@ -174,21 +190,26 @@ func (m *display) Listen() error {
 		return fmt.Errorf("error: port serial is closed")
 	}
 	countError := 0
-	m.bufResp = make([]byte, 0)
-	m.chEvent = make(chan []byte, 3)
-	log.Println("START listen")
+	m.bufResp = make(chan []byte)
+	m.chEvent = make(chan []byte)
+	fmt.Println("START listen")
 	ch := make(chan []byte)
 	go func() {
 		defer func() {
+			fmt.Println("STOP listen")
 			close(m.chEvent)
 			close(ch)
-			m.status = OPENED
+			if m.status == LISTEN {
+				m.status = OPENED
+			}
 		}()
+
 		funcRead := func(v []byte) {
-			//log.Printf("read serial port: [% X]\n", v)
 			lenValue := 0
-			//log.Printf("vector: [% X]\n", v)
-			if len(v) > 2 && bytes.Equal(v[:2], []byte{0xFC, 0xEB}) {
+			if len(v) <= 0 {
+				return
+			} else if len(v) > 2 && bytes.Equal(v[:2], []byte{0xFC, 0xEB}) {
+				log.Printf("respuesta low 0 [% X]\n", v[:])
 				if len(v) > 8 {
 					lenValue = int(binary.BigEndian.Uint16(v[2:4]))
 					msg := make([]byte, 0)
@@ -202,6 +223,7 @@ func (m *display) Listen() error {
 					}
 				}
 			} else if len(v) > 2 && bytes.Equal(v[:2], []byte{0xFC, 0x87}) {
+				log.Printf("respuesta low 1 [% X]\n", v[:])
 				if len(v) > 5 {
 					lenValue = int(binary.BigEndian.Uint16(v[2:4]))
 					msg := make([]byte, 0)
@@ -214,19 +236,34 @@ func (m *display) Listen() error {
 						log.Printf("evento ????X [% X]\n", msg)
 					}
 				}
-			} else if len(v) > 2 && v[0] == byte(0xFC) {
-				if len(v) > 4 {
-					lenValue = int(binary.BigEndian.Uint16(v[2:4]))
-					if len(v) < lenValue+4 {
-						return
-					}
-					m.bufResp = v[:lenValue+4]
-					//log.Printf("respuesta low [% X]\n", m.bufResp)
+			} else if len(v) > 2 && bytes.Equal(v[:2], []byte{0xFC, 0xFB}) {
+				log.Printf("respuesta low 2 [% X]\n", v[:])
+				select {
+				case m.bufResp <- v[:lenValue+4]:
+				default:
+					log.Printf("msg ????X [% X]\n", v[:lenValue+4])
+				}
+			} else if len(v) > 4 && v[0] == byte(0xFC) {
+				log.Printf("respuesta low 3 [% X]\n", v[:])
+				lenValue = int(binary.BigEndian.Uint16(v[2:4]))
+				if len(v) < lenValue+4 {
+					return
+				}
+				log.Printf("respuesta low 3 [% X]\n", v[:])
+				select {
+				case m.bufResp <- v[:lenValue+4]:
+				default:
+					log.Printf("msg ????X [% X]\n", v[:lenValue+4])
+				}
+			} else {
+				log.Printf("respuesta low 4 [% X]\n", v[:])
+				select {
+				case m.bufResp <- v[:]:
+				default:
+					log.Printf("msg ????X [% X]\n", v[:])
 				}
 			}
 		}
-
-		// buf := make([]byte, 0)
 		for {
 			/**/
 			select {
@@ -234,41 +271,35 @@ func (m *display) Listen() error {
 				return
 			default:
 			}
-			/**/
-			//log.Printf("bajo nivel 1\n")
 			buf, err := m.recv()
 			if err != nil {
 				if countError >= maxCountError {
 					return
 				}
 				countError++
+				continue
 			}
+			countError = 0
 			if len(buf) <= 0 {
 				continue
 			}
-			// //log.Printf("bajo nivel 2: len: %d, [% X]\n", len(res), res)
-			// buf = append(buf, res...)
-			// if n >= bufferLen {
-			// 	continue
-			// }
 			for {
 				if len(buf) > 0 && buf[0] == byte(0xFC) {
 					if len(buf) > 4 {
 						lenValue := int(binary.BigEndian.Uint16(buf[2:4]))
 						if len(buf) >= lenValue+4 {
-							//log.Printf("Atrapado\n")
 							funcRead(buf[0 : lenValue+4])
-							//log.Printf("liberado\n")
 							buf = buf[4+lenValue:]
-							//log.Printf("bajo nivel 3: [% X]\n", buf)
 							continue
 						}
 					}
+					funcRead(buf[:])
+					break
+				} else {
+					funcRead(buf[:])
 				}
-				// buf = make([]byte, 0)
 				break
 			}
-			// time.Sleep(20 * time.Millisecond)
 		}
 	}()
 	m.status = LISTEN
@@ -276,51 +307,54 @@ func (m *display) Listen() error {
 }
 
 func (m *display) StopListen() {
-	go func() {
+	if m.stopListen != nil {
 		select {
-		case m.stopListen <- 1:
-		case <-time.After(10 * time.Second):
+		case <-m.stopListen:
+		default:
+			close(m.stopListen)
 		}
-	}()
+	}
 }
 
 //Primitive function to send and recieve bytes to and from display device.
 //recv, flag to wait a response form device.
 func (m *display) SendRecv(data []byte) ([]byte, error) {
-	// m.muxSend.Lock()
-	// defer m.muxSend.Unlock()
-	// res := make([]byte, 0)
-	m.bufResp = make([]byte, 0)
+	m.wmux.Lock()
+	defer m.wmux.Unlock()
+	fmt.Println("SendRecv ########")
+	defer fmt.Println("end SendRecv ########")
 
 	if err := m.send(data); err != nil {
 		return nil, err
 	}
 
-	//log.Printf("request End: [% X]\n", data)
 	if m.status == LISTEN {
 		tAfter1 := time.After(timeoutRead)
-		tick1 := time.NewTicker(10 * time.Millisecond)
-		defer tick1.Stop()
+		count := 0
 		for {
 			select {
-			case <-tick1.C:
-				if len(m.bufResp) > 0 {
-					//log.Printf("response End 1: [% X]\n", m.bufResp)
-					res := m.bufResp
+			case res := <-m.bufResp:
+				fmt.Printf("count: %d\n", (count))
+				count++
+				if len(res) > 0 {
 					return res[:], nil
 				}
 			case <-tAfter1:
-				log.Println("timeoutRead")
+				log.Println("timeoutRead ////")
 				return nil, ErrorDevTimeout
 			}
 		}
 	}
-	return m.recv()
+	/**/
+	res, err := m.recv()
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 //Send bytes data to device. Don't wait response.
 func (m *display) Send(data []byte) error {
-
 	if m.status == CLOSED {
 		return fmt.Errorf("device CLOSED")
 	}
@@ -328,8 +362,7 @@ func (m *display) Send(data []byte) error {
 }
 
 func (m *display) send(data []byte) error {
-	m.muxSend.Lock()
-	defer m.muxSend.Unlock()
+
 	if data == nil {
 		return ErrorDevNull
 	}
@@ -339,12 +372,11 @@ func (m *display) send(data []byte) error {
 	n, err := m.port.Write(data)
 	if err != nil || n <= 0 {
 		return fmt.Errorf("error Write: %w", err)
-
 	}
 	if n <= 0 {
 		return ErrorDevEmptyWrite
 	}
-	/**
+	/**/
 	log.Printf("request: [% X]\n", data)
 	/**/
 	return nil
@@ -352,35 +384,36 @@ func (m *display) send(data []byte) error {
 
 /**/
 func (m *display) Recv() ([]byte, error) {
-	//m.muxRecv.Lock()
-	//defer m.muxRecv.Unlock()
-	m.bufResp = make([]byte, 0)
+
 	if m.status == LISTEN {
-		tAfter := time.After(timeoutRead)
-		tTick := time.NewTicker(10 * time.Millisecond)
-		defer tTick.Stop()
+		count := 0
 		for {
 			select {
-			case <-tTick.C:
-				if len(m.bufResp) > 0 {
-					res := make([]byte, len(m.bufResp))
-					copy(res, m.bufResp)
-					return res, nil
+			case res := <-m.bufResp:
+				fmt.Printf("count: %d\n", (count))
+				count++
+				if len(res) > 0 {
+					return res[:], nil
 				}
-			case <-tAfter:
+			case <-time.After(timeoutRead):
 				return nil, ErrorDevTimeout
 			}
 		}
 	}
-	//	log.Printf("NOT LISTEN: %d\n", m.status)
-	return m.recv()
-}
 
-/**/
+	res, err := m.recv()
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
 
 //Primitive function to send and recieve bytes to and from display device.
 //recv, flag to wait a response form device.
 func (m *display) recv() ([]byte, error) {
+
+	m.mux.Lock()
+	defer m.mux.Unlock()
 
 	if m.status == CLOSED {
 		return nil, ErrorDevClosed
@@ -391,31 +424,36 @@ func (m *display) recv() ([]byte, error) {
 	}
 
 	reader := bufio.NewReader(m.port)
-
-	buf := make([]byte, bufferLen)
 	tn := time.Now()
-	n, err := reader.Read(buf)
+	buf, err := reader.ReadBytes('\xFE')
 	if err != nil {
 		if !errors.Is(err, io.EOF) {
 			return nil, err
 		}
-		if m.options.ReadTimeout > minReadWait && time.Since(tn) < minReadWait {
+		if m.options.ReadTimeout > 0 && time.Since(tn) < m.options.ReadTimeout/10 {
 			return nil, err
 		}
+		// fmt.Println("recv timeout")
 	}
+	n := len(buf)
 	if n <= 0 {
 		return nil, nil
 	}
-	//log.Printf("parcial response 1: [% X]\n", res)
-	return buf[:n], nil
+
+	response := make([]byte, 0)
+	response = append(response, buf[:n]...)
+	log.Printf("Response_0: [% X]\n", buf[:n])
+	return response, nil
 }
 
 //Send a command to display device
 //cmd, id for the command
 //wait response
 func (m *display) SendRecvCmd(cmd int, data []byte) ([]byte, error) {
-	// m.muxSend.Lock()
-	// defer m.muxSend.Unlock()
+	m.wmux.Lock()
+	defer m.wmux.Unlock()
+	fmt.Println("SendRecvCmd ########")
+	defer fmt.Println("end SendRecvCmd ########")
 	dat1 := []byte{0xFE, byte(cmd)}
 	if data != nil {
 		dat1 = append(dat1, data...)
@@ -427,37 +465,36 @@ func (m *display) SendRecvCmd(cmd int, data []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	//log.Printf("request End: [% X]\n", dat1)
 	if m.status == LISTEN {
 		after := time.After(timeoutRead)
 		tick := time.NewTicker(10 * time.Millisecond)
 		defer tick.Stop()
-		m.bufResp = make([]byte, 0)
+		// count := 0
 	for_src:
 		for {
 			select {
-			case <-tick.C:
-				if len(m.bufResp) > 1 {
-					//log.Printf("response End 1: [% X]\n", m.bufResp)
-					res = make([]byte, len(m.bufResp))
-					copy(res, m.bufResp)
-					if res[1] != byte(cmd) {
-						log.Printf("Other response: [% X]\n", m.bufResp)
-						m.bufResp = make([]byte, 0)
-						continue
-					}
+			case res = <-m.bufResp:
+				// fmt.Printf("count: %d, %X\n", (count), res)
+				// count++
+				if len(res) > 1 && res[1] == byte(cmd) {
+					fmt.Printf("SendRecvCmd response: %X\n", (res))
 					break for_src
 				}
+				continue
 			case <-after:
 				log.Println("timeoutRead")
 				return res, ErrorDevTimeout
 			}
 		}
 	} else {
-		// time.Sleep(timeoutRead * time.Millisecond)
-		return m.recv()
+		/**/
+		res, err := m.recv()
+		if err != nil {
+			return nil, err
+		}
+		return res, nil
+		/**/
 	}
-	//log.Printf("SendRecvCmd response: [% X]", res)
 
 	switch {
 	case len(res) <= 0:
@@ -480,7 +517,7 @@ func (m *display) SendCmd(cmd int, data []byte) error {
 		dat1 = append(dat1, data...)
 	}
 
-	return m.Send(dat1)
+	return m.send(dat1)
 }
 
 //Send echo data and to wait for a response.
@@ -505,26 +542,38 @@ func (m *display) ClrScreen() error {
 
 //Run script binary. The filename path is a local path in display device
 func (m *display) RunScript(filename string) error {
+	m.wmux.Lock()
+	defer m.wmux.Unlock()
+	fmt.Println("runScript ########")
+	defer fmt.Println("end runScript ########")
 	data := []byte(filename)
 	data = append(data, 0x00)
 	if err := m.SendCmd(0x5D, data); err != nil {
 		return err
 	}
-	//fmt.Printf("salida Run: %v\n", res)
-	//time.Sleep(1 * time.Second)
-	if _, err := m.Recv(); err != nil {
-		return err
+	var res []byte
+	count := 0
+	for range make([]int, 8) {
+		res, _ = m.Recv()
+		// fmt.Printf("////////// 1: %X\n", res)
+		if len(res) > 1 {
+			if res[1] == 0xFB {
+				if count > 0 {
+					return nil
+				}
+				count++
+			}
+		}
 	}
-	return nil
-}
+	// fmt.Printf("////////// 2: %X\n", res)
+	if len(res) > 1 {
+		if res[1] == 0xFA || res[1] == 0xFB {
+			log.Println("without err")
+			return nil
+		}
+	}
 
-//Load in display memory a bitmap object from filename. The filename path in a local in display device.
-func (m *display) LoadBitmap(id int, filename string) ([]byte, error) {
-	data := []byte(filename)
-	data = append(data, 0)
-	res, err := m.SendRecvCmd(0x5F, data)
-	//fmt.Printf("salida Run: %v\n", res)
-	return res, err
+	return fmt.Errorf("bad response: [% X]", res)
 }
 
 //Active buzzer in device.
@@ -542,8 +591,6 @@ func (m *display) BuzzerActive(frec, time int) error {
 	return m.SendCmd(0xBB, data)
 }
 
-//TOUCH
-
 //Change Touch Reporting Style
 func (m *display) ChangeTouchReporting(style int) error {
 	return m.SendCmd(0x87, []byte{byte(style)})
@@ -553,13 +600,6 @@ func (m *display) ChangeTouchReporting(style int) error {
 func (m *display) GetTouchReporting() ([]byte, error) {
 	return m.SendRecvCmd(0x88, nil)
 }
-
-//Create a touch region
-//regId, region ID
-//x, y, coordinate of the touch region
-//width, width of the region
-//height, height of the region
-/**/
 
 func (m *display) GetToggleState(id int) ([]byte, error) {
 	return m.SendRecvCmd(171, []byte{byte(id & 0xFF)})

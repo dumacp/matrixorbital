@@ -14,11 +14,24 @@ var LabelText GTT25PropertyType = []byte{0x09, 0x06}
 var LabelFontSize GTT25PropertyType = []byte{0x09, 0x0A}
 var SliderValue GTT25PropertyType = []byte{0x0A, 0x08}
 var ButtonState GTT25PropertyType = []byte{0x15, 0x0C}
+var ButtonDisableBitmap GTT25PropertyType = []byte{0x15, 0x0e}
 var ButtonText GTT25PropertyType = []byte{0x15, 0x03}
 var SliderLabelText GTT25PropertyType = []byte{0x0A, 0x09}
 var CanFocus GTT25PropertyType = []byte{0x02, 0x05}
 var HasFocus GTT25PropertyType = []byte{0x02, 0x06}
 var Enabled GTT25PropertyType = []byte{0x02, 0x07}
+var Invalidated GTT25PropertyType = []byte{0x02, 0x00}
+var Left GTT25PropertyType = []byte{0x02, 0x01}
+var Top GTT25PropertyType = []byte{0x02, 0x02}
+var Width GTT25PropertyType = []byte{0x02, 0x03}
+var Height GTT25PropertyType = []byte{0x02, 0x04}
+var VisualBitmap_Source GTT25PropertyType = []byte{0x1F, 0x00}
+
+var LabelBackgroundR GTT25PropertyType = []byte{0x09, 0x00}
+var LabelBackgroundG GTT25PropertyType = []byte{0x09, 0x01}
+var LabelBackgroundB GTT25PropertyType = []byte{0x09, 0x02}
+
+var VisualBitmap_SourceIndex GTT25PropertyType = []byte{0x1F, 0x01}
 
 func (typeP GTT25PropertyType) Value() []byte {
 	return []byte(typeP)
@@ -111,7 +124,7 @@ func (m *display) SetPropertyValueU8(id int, prpType GTT25PropertyType) func(val
 			return fmt.Errorf("error in response: [% X]", res)
 		}
 		if res[len(res)-1] != byte(0xFE) {
-			return fmt.Errorf("error in request U8, status code: [%X]", res[2])
+			return fmt.Errorf("error in request U8, status code: [%X], [% X]", res[2], res)
 		}
 		/**/
 		return nil
@@ -156,6 +169,34 @@ func (m *display) SetPropertyText(id int, prpType GTT25PropertyType) func(text s
 		}
 		/**/
 		return nil
+	}
+}
+
+func ApduGetPropertyText(id int, prpType GTT25PropertyType) []byte {
+	data := []byte{0xFE, 0xFA, 0x01, 0x09}
+	idb := make([]byte, 2)
+	binary.BigEndian.PutUint16(idb, uint16(id))
+	data = append(data, idb...)
+	data = append(data, prpType.Value()...)
+	return data
+}
+
+//Get Property Text GTT25Object
+func (m *display) GetPropertyText(id int, prpType GTT25PropertyType) func() ([]byte, error) {
+	return func() ([]byte, error) {
+		data := ApduGetPropertyText(id, prpType)
+		res, err := m.SendRecv(data)
+		if err != nil {
+			return nil, err
+		}
+		if len(res) < 3 {
+			return nil, fmt.Errorf("error in response: [% X]", res)
+		}
+		if res[len(res)-3] != byte(0xFE) {
+			return nil, fmt.Errorf("error in request GetText, status code: [%X]", res[2])
+		}
+
+		return res[len(res)-2:], nil
 	}
 }
 
@@ -236,7 +277,7 @@ func (m *display) GetPropertyValueU8(id int, prpType GTT25PropertyType) func() (
 			return 0x00, fmt.Errorf("error in response: [% X]", res)
 		}
 		if res[len(res)-2] != byte(0xFE) {
-			return byte(0x00), fmt.Errorf("error in request U8, status code: [%X]", res[2])
+			return byte(0x00), fmt.Errorf("error in request GetU8, status code: [%X]", res[2])
 		}
 		return res[len(res)-1], nil
 	}

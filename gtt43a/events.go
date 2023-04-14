@@ -35,6 +35,7 @@ func (m *display) Events() (chan *Event, error) {
 	mc := make(chan *Event, 0)
 	go func() {
 		defer close(mc)
+		defer fmt.Println("STOP listen events")
 		for v := range m.chEvent {
 			log.Printf("read Event: [% X]\n", v)
 			objID := uint16(0)
