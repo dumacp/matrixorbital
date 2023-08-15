@@ -1,11 +1,14 @@
-/**
+/*
+*
 Package to send commands and recieve response to and from gtt43a device.
-**/
+*
+*/
 package gtt43a
 
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -87,6 +90,7 @@ type Display interface {
 	WriteScratch(addr int, data []byte) error
 	ReadScratch(addr, size int) ([]byte, error)
 	Listen() error
+	ListenWithContext(ctx context.Context) error
 	Events() (chan *Event, error)
 	StopListen()
 	AnimationStartStop(id, action int) error
@@ -101,9 +105,9 @@ type display struct {
 	mux     sync.Mutex
 	wmux    sync.Mutex
 	// muxRecv    sync.Mutex
-	bufResp    chan []byte
-	chEvent    chan []byte
-	stopListen chan int
+	bufResp chan []byte
+	chEvent chan []byte
+	cancel  func()
 }
 
 const (
@@ -125,16 +129,15 @@ const (
 	maxCountError int           = 5
 )
 
-//Create a new Display device
+// Create a new Display device
 func NewDisplay(opt *PortOptions) Display {
 	disp := &display{}
 	disp.options = opt
 	disp.status = CLOSED
-	disp.stopListen = make(chan int)
 	return disp
 }
 
-//Open device comunication channel
+// Open device comunication channel
 func (m *display) Open() error {
 	if m.status == OPENED || m.status == LISTEN {
 		return nil
@@ -156,19 +159,14 @@ func (m *display) Open() error {
 	return nil
 }
 
-//Clsoe device comunication channel
+// Clsoe device comunication channel
 func (m *display) Close() error {
 	fmt.Println("CLOSE gtt43a")
 	defer func() {
 		m.status = CLOSED
 	}()
-	if m.stopListen != nil {
-		select {
-		case <-m.stopListen:
-		default:
-			close(m.stopListen)
-			time.Sleep(100 * time.Millisecond)
-		}
+	if m.cancel != nil {
+		m.cancel()
 	}
 	if m.port == nil {
 		return nil
@@ -180,15 +178,35 @@ func (m *display) Close() error {
 	return nil
 }
 
-//Listen is a go rutine that listening serial port to detect messages
-//Return channel with  messages (Event struct)
+// Listen is a go rutine that listening serial port to detect messages
+// Return channel with  messages (Event struct)
 func (m *display) Listen() error {
+	return m.ListenWithContext(context.TODO())
+}
+
+// ListenWithContext is a go rutine that listening serial port to detect messages
+// Return channel with  messages (Event struct)
+func (m *display) ListenWithContext(contxt context.Context) error {
 	if m.status == LISTEN {
 		return fmt.Errorf("error: already Listening display")
 	}
 	if m.status != OPENED {
 		return fmt.Errorf("error: port serial is closed")
 	}
+	if m.cancel != nil {
+		m.cancel()
+	}
+
+	var ctx context.Context
+	var cancel func()
+	if contxt != nil {
+		ctx, cancel = context.WithCancel(contxt)
+		m.cancel = cancel
+	} else {
+		ctx, cancel = context.WithCancel(context.TODO())
+		m.cancel = cancel
+	}
+
 	countError := 0
 	m.bufResp = make(chan []byte)
 	m.chEvent = make(chan []byte)
@@ -199,6 +217,9 @@ func (m *display) Listen() error {
 			fmt.Println("STOP listen")
 			close(m.chEvent)
 			close(ch)
+			if cancel != nil {
+				cancel()
+			}
 			if m.status == LISTEN {
 				m.status = OPENED
 			}
@@ -267,7 +288,7 @@ func (m *display) Listen() error {
 		for {
 			/**/
 			select {
-			case <-m.stopListen:
+			case <-ctx.Done():
 				return
 			default:
 			}
@@ -307,17 +328,13 @@ func (m *display) Listen() error {
 }
 
 func (m *display) StopListen() {
-	if m.stopListen != nil {
-		select {
-		case <-m.stopListen:
-		default:
-			close(m.stopListen)
-		}
+	if m.cancel != nil {
+		m.cancel()
 	}
 }
 
-//Primitive function to send and recieve bytes to and from display device.
-//recv, flag to wait a response form device.
+// Primitive function to send and recieve bytes to and from display device.
+// recv, flag to wait a response form device.
 func (m *display) SendRecv(data []byte) ([]byte, error) {
 	m.wmux.Lock()
 	defer m.wmux.Unlock()
@@ -353,7 +370,7 @@ func (m *display) SendRecv(data []byte) ([]byte, error) {
 	return res, nil
 }
 
-//Send bytes data to device. Don't wait response.
+// Send bytes data to device. Don't wait response.
 func (m *display) Send(data []byte) error {
 	if m.status == CLOSED {
 		return fmt.Errorf("device CLOSED")
@@ -408,8 +425,8 @@ func (m *display) Recv() ([]byte, error) {
 	return res, nil
 }
 
-//Primitive function to send and recieve bytes to and from display device.
-//recv, flag to wait a response form device.
+// Primitive function to send and recieve bytes to and from display device.
+// recv, flag to wait a response form device.
 func (m *display) recv() ([]byte, error) {
 
 	m.mux.Lock()
@@ -446,9 +463,9 @@ func (m *display) recv() ([]byte, error) {
 	return response, nil
 }
 
-//Send a command to display device
-//cmd, id for the command
-//wait response
+// Send a command to display device
+// cmd, id for the command
+// wait response
 func (m *display) SendRecvCmd(cmd int, data []byte) ([]byte, error) {
 	m.wmux.Lock()
 	defer m.wmux.Unlock()
@@ -509,8 +526,8 @@ func (m *display) SendRecvCmd(cmd int, data []byte) ([]byte, error) {
 	return res[4:], nil
 }
 
-//Send a Command to display device.
-//don't wait response
+// Send a Command to display device.
+// don't wait response
 func (m *display) SendCmd(cmd int, data []byte) error {
 	dat1 := []byte{0xFE, byte(cmd)}
 	if data != nil {
@@ -520,27 +537,27 @@ func (m *display) SendCmd(cmd int, data []byte) error {
 	return m.send(dat1)
 }
 
-//Send echo data and to wait for a response.
+// Send echo data and to wait for a response.
 func (m *display) Echo(data []byte) ([]byte, error) {
 	return m.SendRecvCmd(0xFF, data)
 }
 
-//Send reset command to display device
+// Send reset command to display device
 func (m *display) Reset() error {
 	return m.Send([]byte{0xFE, 0x01})
 }
 
-//Request Version and wait for a response.
+// Request Version and wait for a response.
 func (m *display) Version() ([]byte, error) {
 	return m.SendRecvCmd(0x00, nil)
 }
 
-//Clear actual Screen
+// Clear actual Screen
 func (m *display) ClrScreen() error {
 	return m.SendCmd(0x58, nil)
 }
 
-//Run script binary. The filename path is a local path in display device
+// Run script binary. The filename path is a local path in display device
 func (m *display) RunScript(filename string) error {
 	m.wmux.Lock()
 	defer m.wmux.Unlock()
@@ -576,9 +593,9 @@ func (m *display) RunScript(filename string) error {
 	return fmt.Errorf("bad response: [% X]", res)
 }
 
-//Active buzzer in device.
-//frec, is the frecuency of the signal
-//time, is the duration of the signal
+// Active buzzer in device.
+// frec, is the frecuency of the signal
+// time, is the duration of the signal
 func (m *display) BuzzerActive(frec, time int) error {
 
 	data := make([]byte, 0)
@@ -591,12 +608,12 @@ func (m *display) BuzzerActive(frec, time int) error {
 	return m.SendCmd(0xBB, data)
 }
 
-//Change Touch Reporting Style
+// Change Touch Reporting Style
 func (m *display) ChangeTouchReporting(style int) error {
 	return m.SendCmd(0x87, []byte{byte(style)})
 }
 
-//Get Touch Reporting Style
+// Get Touch Reporting Style
 func (m *display) GetTouchReporting() ([]byte, error) {
 	return m.SendRecvCmd(0x88, nil)
 }
