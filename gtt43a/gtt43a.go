@@ -441,8 +441,26 @@ func (m *display) recv() ([]byte, error) {
 	}
 
 	reader := bufio.NewReader(m.port)
+
+	// tn := time.Now()
+	// buf, err := reader.ReadBytes('\xFE')
+	// if err != nil {
+	// 	if !errors.Is(err, io.EOF) {
+	// 		return nil, err
+	// 	}
+	// 	if m.options.ReadTimeout > 0 && time.Since(tn) < m.options.ReadTimeout/10 {
+	// 		return nil, err
+	// 	}
+	// 	// fmt.Println("recv timeout")
+	// }
+	// n := len(buf)
+	// if n <= 0 {
+	// 	return nil, nil
+	// }
+
 	tn := time.Now()
-	buf, err := reader.ReadBytes('\xFE')
+	buf := make([]byte, 1024)
+	n, err := reader.Read(buf)
 	if err != nil {
 		if !errors.Is(err, io.EOF) {
 			return nil, err
@@ -452,11 +470,10 @@ func (m *display) recv() ([]byte, error) {
 		}
 		// fmt.Println("recv timeout")
 	}
-	n := len(buf)
+	// n := len(buf)
 	if n <= 0 {
 		return nil, nil
 	}
-
 	response := make([]byte, 0)
 	response = append(response, buf[:n]...)
 	log.Printf("Response_0: [% X]\n", buf[:n])
