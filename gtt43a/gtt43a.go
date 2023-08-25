@@ -351,7 +351,7 @@ func (m *display) SendRecv(data []byte) ([]byte, error) {
 		for {
 			select {
 			case res := <-m.bufResp:
-				fmt.Printf("count: %d\n", (count))
+				fmt.Printf("count: %d, %X\n", (count), res)
 				count++
 				if len(res) > 0 {
 					return res[:], nil
@@ -407,7 +407,7 @@ func (m *display) Recv() ([]byte, error) {
 		for {
 			select {
 			case res := <-m.bufResp:
-				fmt.Printf("count: %d\n", (count))
+				fmt.Printf("count: %d, %X\n", (count), res)
 				count++
 				if len(res) > 0 {
 					return res[:], nil
@@ -561,7 +561,7 @@ func (m *display) Echo(data []byte) ([]byte, error) {
 
 // Send reset command to display device
 func (m *display) Reset() error {
-	return m.Send([]byte{0xFE, 0x01})
+	return m.RunReset()
 }
 
 // Request Version and wait for a response.
@@ -572,6 +572,39 @@ func (m *display) Version() ([]byte, error) {
 // Clear actual Screen
 func (m *display) ClrScreen() error {
 	return m.SendCmd(0x58, nil)
+}
+
+// RunReset command. Software reset
+func (m *display) RunReset() error {
+	m.wmux.Lock()
+	defer m.wmux.Unlock()
+	fmt.Println("runreset ########")
+	defer fmt.Println("end runReset ########")
+	if err := m.SendCmd(0x01, nil); err != nil {
+		return err
+	}
+	var res []byte
+	count := 0
+	for range make([]int, 8) {
+		res, _ = m.Recv()
+		// fmt.Printf("////////// 1: %X\n", res)
+		if len(res) > 1 {
+			if res[1] == 0xFB {
+				if count > 2 {
+					return nil
+				}
+				count++
+			}
+		}
+	}
+	// fmt.Printf("////////// 2: %X\n", res)
+	if len(res) > 1 {
+		if res[1] == 0xFA || res[1] == 0xFB {
+			log.Println("without err")
+			return nil
+		}
+	}
+	return fmt.Errorf("bad response: [% X]", res)
 }
 
 // Run script binary. The filename path is a local path in display device
